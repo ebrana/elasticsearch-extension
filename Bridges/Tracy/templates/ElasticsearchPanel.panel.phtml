@@ -1,0 +1,274 @@
+<?php
+
+use Tracy\Helpers;
+
+?>
+
+<style class="tracy-debug">
+    #tracy-debug .nette-ElasticsearchConnectionPanel-explain td { white-space: pre }
+    #nette-ElasticsearchConnectionPanel-title .green {
+        color: green;
+    }
+    .tracy-tab-bar {
+        display: table;
+        list-style-type: none;
+        padding: 0;
+        margin-top: 10px;
+    }
+    ul.tracy-tab-bar>li {
+        float: left;
+        padding: 10px;
+        background-color: lightgray;
+    }
+    ul.tracy-tab-bar>li:hover {
+        background-color: #e4bebe;
+        cursor: pointer;
+    }
+
+    ul.tracy-tab-bar>li.tracy-active {
+        background-color: #919191;
+        color: white;
+    }
+    #tracy-debug .nette-ElasticsearchConnectionPanel-explain .es-strong {
+        font-weight: bold;
+        font-size: 12px;
+    }
+</style>
+
+<h1 id="nette-ElasticsearchConnectionPanel-title">Queries: <?php
+    echo $collector->getQueryCount(), ($collector->getTime() ? sprintf(', time: %0.3f ms', $collector->getTime() * 1000) : '');
+    echo ', version: ' . $collector->getInfo()['version']['number'];
+    if ($collector->isCompatibility()) {
+        echo '<span class="green">✓</span>';
+    } else {
+        echo '❌';
+    }
+    ?>
+</h1>
+
+<section class="tracy-section">
+<div class="tracy-section-panel">
+    <div class="tracy-inner-container">
+
+        <div class="tracy-tabs">
+            <ul class="tracy-tab-bar">
+                <li class="tracy-tab-label tracy-active"><span>Queries</span></li>
+                <li class="tracy-tab-label"><span>Connections</span></li>
+                <li class="tracy-tab-label"><span>Mappings</span></li>
+                <li class="tracy-tab-label"><span>Server info</span></li>
+            </ul>
+
+            <div>
+                <div class="tracy-tab-panel tracy-pane tracy-active">
+                    <table class="tracy-sortable" id="nette-ElasticsearchConnectionPanel-queries">
+                        <tr><th>Time&nbsp;ms</th><th>Elasticsearch Query</th><th>Result</th><th>Shards</th><th>Kibana</th></tr>
+                        <?php
+                        foreach ($collector->getQueries() as $query):
+                            ?>
+                            <tr>
+                                <td class="nowrap">
+                                    <?php echo sprintf('%0.3f ms', $query['executionMS'] * 1000) ?>
+                                    <br>
+                                    <?php if (is_string($query['body'])): ?>
+                                        <a class="tracy-toggle tracy-collapsed" data-tracy-ref="^tr .nette-ElasticsearchConnectionPanel-explain">pretty query</a>
+                                    <?php endif ?>
+                                </td>
+                                <td class="nette-DbConnectionPanel-query nette-DbConnectionPanel-query-source"><?php
+                                    echo $query['query'] . '<br>';
+                                    //var_dump($query);
+                                    if (is_string($query['body'])) {
+                                        echo $query['body'];
+                                        echo '<table class="tracy-collapsed nette-ElasticsearchConnectionPanel-explain">';
+                                        echo '<tr><th>';
+                                        echo '<pre>' . print_r(json_encode(json_decode($query['body'], false, 512, JSON_THROW_ON_ERROR), JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT), true) . '</pre>';
+                                        echo '</td></tr></table>';
+                                    }
+                                    ?>
+                                </td>
+                                <td class="nowrap">
+                                    <?php
+                                        if ($query['boolResult']) {
+                                            echo $query['boolResult'] === true ? 'true' : 'false';
+                                        } elseif ($query['countResult']) {
+                                            echo $query['countResult'];
+                                        } elseif ($query['result']) {
+                                            $result = $query['result'];
+                                            $hits = $result->getHits();
+                                            echo 'totalValue: ' . $hits->getTotalValue() . '<br>';
+                                            if ($hits->getMaxScore()) {
+                                                echo 'maxScore: ' . $hits->getMaxScore() . '<br>';
+                                            }
+                                            if ($hits->getTotalRelation()) {
+                                                echo 'totalRelation: ' . $hits->getTotalRelation() . '<br>';
+                                            }
+                                            echo 'took: ' . $result->getTook() . '<br>';
+                                            echo 'timedOut: ' . ($result->isTimedOut() ? 'true' : 'false') . '<br>';
+                                            echo 'aggregations: ' . $result->getAggregations()->count() . '<br>';
+                                        } else {
+                                            echo '-';
+                                        }
+                                    ?>
+                                </td>
+                                <td>
+                                    <?php
+                                        if ($query['result']) {
+                                            $shards = $query['result']->getShards();
+                                            echo 'total: ' . $shards->getTotal() . '<br>';
+                                            echo 'success: ' . $shards->getSuccessful() . '<br>';
+                                            echo 'skipped: ' . $shards->getSkipped() . '<br>';
+                                            echo 'failed: ' . $shards->getFailed() . '<br>';
+                                        } else {
+                                            echo '-';
+                                        }
+                                    ?>
+                                </td>
+                                <?php
+                                $kibana = $collector->getKibana();
+                                if ($kibana) {
+                                    echo '<td>';
+                                    if (is_string($query['body'])) {
+                                        $body = '';
+                                        if (is_string($query['body'])) {
+                                            $body = print_r(json_encode(json_decode($query['body'], false, 512, JSON_THROW_ON_ERROR),
+                                                JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT), true);
+                                        }
+
+                                        echo '<a href="' . $kibana . '/app/kibana#/dev_tools/console?load_from=data:text/plain,' . LZCompressor\LZString::compressToBase64($query['query'] . PHP_EOL . $body) . '" target="_blank">console</a>';
+                                    }
+                                    echo '</td>';
+                                }
+                                ?>
+                            </tr>
+                        <?php endforeach ?>
+                    </table>
+                </div>
+
+                <div class="tracy-tab-panel tracy-pane">
+                    <div class="tab-content">
+                        <?php if (count($collector->getConnection()) === 0): ?>
+                            <div class="empty">
+                                <p>There are no configured Elasticsearch connection.</p>
+                            </div>
+                        <?php else: ?>
+                            <table>
+                                <thead>
+                                <tr>
+                                    <th scope="col" class="key">Name</th>
+                                    <th scope="col">Service</th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                <?php foreach ($collector->getConnection() as $key => $connection): ?>
+                                    <tr>
+                                        <th scope="row"><?php echo $key ?></th>
+                                        <td><?php echo 'elasticsearch.' . $connection ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        <?php endif ?>
+                    </div>
+                </div>
+
+                <div class="tracy-tab-panel tracy-pane">
+                    <?php if (count($collector->getEntities()) === 0): ?>
+                        <div class="empty">
+                            <p>No mapped entities.</p>
+                        </div>
+                    <?php else: ?>
+                        <?php foreach ($collector->getEntities() as $type => $classes): ?>
+                        <?php if (empty($classes) && $type !== 'invalid'): ?>
+                            <div class="empty">
+                                <p>No loaded entities.</p>
+                            </div>
+                        <?php elseif (count($classes) > 0): ?>
+                        <table>
+                            <thead>
+                            <tr>
+                                <th scope="col">Class</th>
+                                <th scope="col">Mapping errors</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <?php $i=0; foreach ($classes as $class => $body): ?>
+                            <?php $i++; $contains_errors = $type === 'invalid' ?>
+                            <tr class="<?php echo $contains_errors ? 'status-error' : '' ?>">
+                                <td>
+                                    <a href="<?= Helpers::editorUri($body['file'], $body['line']) ?>"><?php echo $class; ?></a>
+                                    <?php if ($type !== 'invalid'): ?>
+                                    <br>
+                                    <?php echo $body['body']; ?>
+                                    <br>
+                                    <a class="tracy-toggle tracy-collapsed" data-tracy-ref="^td .original-mapping-query-<?php echo $i; ?>" data-toggle-alt-content="Hide pretty query">View pretty query</a>
+                                    <div class="tracy-collapsed nette-ElasticsearchConnectionPanel-explain original-mapping-query-<?php echo $i; ?>">
+                                        <?php $body = print_r(json_encode(json_decode($body['body'], false, 512, JSON_THROW_ON_ERROR),
+                                                JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT), true);
+                                        ?>
+                                        <table><tr><th><pre><?php echo $body; ?></pre></th></tr></table>
+                                    </div>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="font-normal">
+                                    <?php if ($contains_errors): ?>
+                                        <?php echo $body['message']; ?>
+                                    <?php else: ?>
+                                        No errors.
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                        <?php endif; ?>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+
+                <div class="tracy-tab-panel tracy-pane">
+                    <div class="tab-content">
+                        <?php if (count($collector->getConnection()) === 0): ?>
+                            <div class="empty">
+                                <p>There are no configured Elasticsearch connection.</p>
+                            </div>
+                        <?php else: ?>
+                            <table>
+                                <thead>
+                                <tr>
+                                    <th scope="col" class="key">Key</th>
+                                    <th scope="col">Value</th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                <?php foreach ($collector->getInfo() as $key => $value): ?>
+                                    <?php if (is_array($value)): ?>
+                                        <tr>
+                                            <th colspan="2" scope="row"><h2 class="es-strong"><?php echo ucfirst($key) ?></h2></th>
+                                        </tr>
+                                        <?php foreach ($value as $tkey => $tvalue): ?>
+                                            <?php if (is_array($tvalue)) {
+                                                continue;
+                                            } ?>
+                                            <tr>
+                                                <th scope="row"><?php echo $tkey ?></th>
+                                                <td><?php if ($tvalue === true) echo 'true'; elseif ($tvalue === false) { echo 'false'; } else { echo $tvalue; } ?></td>
+                                            </tr>
+                                            <?php endforeach; ?>
+                                    <?php else: ?>
+                                    <tr>
+                                        <th scope="row"><?php echo $key ?></th>
+                                        <td><?php if ($value === true) echo 'true'; elseif ($value === false) { echo 'false'; } else { echo $value; } ?></td>
+                                    </tr>
+                                <?php endif; ?>
+                                <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        <?php endif ?>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+</div>
+</div>
+</section>
