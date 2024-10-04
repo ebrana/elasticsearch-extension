@@ -9,7 +9,7 @@ use Symfony\Component\Console\Input\InputInterface;
 
 trait BooleanOptionResolverTrait
 {
-    private function resolveBoolOption(InputInterface $input, string $name): bool
+    protected function resolveBoolOption(InputInterface $input, string $name): bool
     {
         $value = $input->getOption($name);
         if (!in_array($value, ['0', '1', 'true', 'false', false, true], true)) {

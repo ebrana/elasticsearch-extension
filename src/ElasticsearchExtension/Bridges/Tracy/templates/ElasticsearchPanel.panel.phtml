@@ -38,7 +38,7 @@ use Tracy\Helpers;
 <h1 id="nette-ElasticsearchConnectionPanel-title">Queries: <?php
     echo $collector->getQueryCount(), ($collector->getTime() ? sprintf(', time: %0.3f ms', $collector->getTime() * 1000) : '');
     echo ', version: ' . $collector->getInfo()['version']['number'];
-    if ($collector->isCompatibility()) {
+    if ($collector->isCompatible()) {
         echo '<span class="green">✓</span>';
     } else {
         echo '❌';
@@ -75,7 +75,6 @@ use Tracy\Helpers;
                                 </td>
                                 <td class="nette-DbConnectionPanel-query nette-DbConnectionPanel-query-source"><?php
                                     echo $query['query'] . '<br>';
-                                    //var_dump($query);
                                     if (is_string($query['body'])) {
                                         echo $query['body'];
                                         echo '<table class="tracy-collapsed nette-ElasticsearchConnectionPanel-explain">';

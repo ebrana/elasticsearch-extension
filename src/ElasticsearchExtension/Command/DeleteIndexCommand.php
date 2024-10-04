@@ -9,6 +9,7 @@ use Ebrana\ElasticsearchExtension\Command\Utils\IndexSelectQuestionTrait;
 use Elasticsearch\Connection\Connection;
 use Elasticsearch\Mapping\Index;
 use Elasticsearch\Mapping\MappingMetadataProvider;
+use RuntimeException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Exception\InvalidArgumentException;
@@ -73,50 +74,23 @@ EOF
             ];
         }
 
-        if ($byName) {
-            $find = false;
-            foreach ($this->metadataProvider->getMappingMetadata()->getMetadata() as $index) {
-                if ($index->getName() === $byName) {
-                    $rowsFromProgress[] = $this->process($index, $output);
-                    $find = true;
+        try {
+            switch (true) {
+                case $byName !== null:
+                    $rowsFromProgress[] = $this->processByName($byName, $io, $output);
                     break;
-                }
+                case $byClassName !== null:
+                    $rowsFromProgress[] = $this->processByClassName($byClassName, $io, $output);
+                    break;
+                case $select:
+                    $rowsFromProgress = $this->processBySelect($input, $io, $output);
+                    break;
+                default:
+                    $rowsFromProgress = $this->processByDefault($output);
+                    break;
             }
-            if ($find === false) {
-                $io->error(sprintf('Index name "%s" not found.', $byName));
-
-                return Command::FAILURE;
-            }
-        } elseif ($byClassName) {
-            $index = $this->metadataProvider->getMappingMetadata()->getIndexByClasss($byClassName);
-            if (!$index) {
-                $io->error(sprintf('Index name "%s" not found.', $byName));
-
-                return Command::FAILURE;
-            }
-            $rowsFromProgress[] = $this->process($index, $output);
-        } elseif ($select) {
-            $helper = $this->getHelper('question');
-            $classes = $this->createIndexSelectQuestion($this->metadataProvider, $helper, $input, $output);
-            if (!is_array($classes)) {
-                $io->error('Wrong selected classes. Please select at least one value');
-
-                return Command::FAILURE;
-            }
-
-            foreach ($classes as $class) {
-                $index = $this->metadataProvider->getMappingMetadata()->getIndexByClasss($class);
-                if (null === $index) {
-                    $io->error(sprintf('Index for class "%s" not found.', $class));
-
-                    return Command::FAILURE;
-                }
-                $rowsFromProgress[] = $this->process($index, $output);
-            }
-        } else {
-            foreach ($this->metadataProvider->getMappingMetadata()->getMetadata() as $index) {
-                $rowsFromProgress[] = $this->process($index, $output);
-            }
+        } catch (\Exception $exception) {
+            return Command::FAILURE;
         }
 
         if ($output->isVerbose()) {
@@ -124,6 +98,62 @@ EOF
         }
 
         return Command::SUCCESS;
+    }
+
+    private function processByName(string $byName, SymfonyStyle $io, OutputInterface $output): array
+    {
+        foreach ($this->metadataProvider->getMappingMetadata()->getMetadata() as $index) {
+            if ($index->getName() === $byName) {
+                return $this->process($index, $output);
+            }
+        }
+
+        $io->error(sprintf('Index name "%s" not found.', $byName));
+        throw new RuntimeException('Index name not found.');
+
+    }
+
+    private function processByClassName(string $byClassName, SymfonyStyle $io, OutputInterface $output): array
+    {
+        $index = $this->metadataProvider->getMappingMetadata()->getIndexByClasss($byClassName);
+        if (!$index) {
+            $io->error(sprintf('Index in class "%s" not found.', $byClassName));
+            throw new RuntimeException('Index in class not found.');
+        }
+
+        return $this->process($index, $output);
+    }
+
+    private function processBySelect(InputInterface $input, SymfonyStyle $io, OutputInterface $output): array
+    {
+        $helper = $this->getHelper('question');
+        $classes = $this->createIndexSelectQuestion($this->metadataProvider, $helper, $input, $output);
+        if (!is_array($classes)) {
+            $io->error('Wrong selected classes. Please select at least one value.');
+            throw new RuntimeException('Wrong selected classes. Please select at least one value.');
+        }
+
+        $rowsFromProgress = [];
+        foreach ($classes as $class) {
+            $index = $this->metadataProvider->getMappingMetadata()->getIndexByClasss($class);
+            if (null === $index) {
+                $io->error(sprintf('Index for class "%s" not found.', $class));
+                throw new RuntimeException('Index in class not found.');
+            }
+            $rowsFromProgress[] = $this->process($index, $output);
+        }
+
+        return $rowsFromProgress;
+    }
+
+    private function processByDefault(OutputInterface $output): array
+    {
+        $rowsFromProgress = [];
+        foreach ($this->metadataProvider->getMappingMetadata()->getMetadata() as $index) {
+            $rowsFromProgress[] = $this->process($index, $output);
+        }
+
+        return $rowsFromProgress;
     }
 
     private function process(Index $index, OutputInterface $output): array

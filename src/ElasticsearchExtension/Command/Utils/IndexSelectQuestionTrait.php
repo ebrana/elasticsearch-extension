@@ -15,7 +15,7 @@ trait IndexSelectQuestionTrait
     /**
      * @throws \Psr\Cache\InvalidArgumentException
      */
-    private function createIndexSelectQuestion(
+    protected function createIndexSelectQuestion(
         MappingMetadataProvider $metadataProvider,
         HelperInterface $helper,
         InputInterface $input,

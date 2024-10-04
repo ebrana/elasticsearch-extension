@@ -46,7 +46,7 @@ final class QueryCollector
         return $this->data['info'];
     }
 
-    public function isCompatibility(): bool
+    public function isCompatible(): bool
     {
         return
             version_compare($this->data['info']['version']['number'], self::COMPATIBLE_VERSION, '>=') &&
