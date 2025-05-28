@@ -15,6 +15,7 @@ use Elasticsearch\Connection\Connection;
 use Elasticsearch\Debug\DebugDataHolder;
 use Elasticsearch\Indexing\Builders\DefaultDocumentBuilderFactory;
 use Elasticsearch\Indexing\DocumentFactory;
+use Elasticsearch\Indexing\Interfaces\DocumentBuilderFactoryInterface;
 use Elasticsearch\Mapping\Drivers\AnnotationDriver;
 use Elasticsearch\Mapping\Drivers\JsonDriver;
 use Elasticsearch\Mapping\MappingMetadataFactory;
@@ -38,7 +39,7 @@ class ElasticsearchExtension extends CompilerExtension
             'kibana'      => Expect::string('http://localhost:5601'),
             'cache'       => Expect::string()->nullable(),
             'driver'      => Expect::structure([
-                'type'        => Expect::anyOf('attributes')->default('attributes'),
+                'type'        => Expect::anyOf('attributes', 'json')->default('attributes'),
                 'keyResolver' => Expect::string(),
             ]),
             'hosts'       => Expect::array(['localhost:9200']),
@@ -147,6 +148,19 @@ class ElasticsearchExtension extends CompilerExtension
                 ->setFactory(InformationIndexCommand::class)
                 ->setArguments([$mappingMetadataProvider]);
         }
+    }
+
+    public function beforeCompile(): void
+    {
+        $builder = $this->getContainerBuilder();
+        $documentBuilders = $builder->findByType(DocumentBuilderFactoryInterface::class);
+        $documentFactory = $builder->getDefinition($this->prefix('elasticsearch.documentFactory'));
+
+        foreach ($documentBuilders as $documentBuilder) {
+            $documentFactory->addSetup('$service->addBuilderFactory(?)', [$documentBuilder]);
+        }
+
+        parent::beforeCompile();
     }
 
     protected function hasConsole(): bool

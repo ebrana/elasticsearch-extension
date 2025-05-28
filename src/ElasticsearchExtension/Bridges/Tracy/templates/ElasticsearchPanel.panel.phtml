@@ -66,7 +66,7 @@ use Tracy\Helpers;
                         foreach ($collector->getQueries() as $query):
                             ?>
                             <tr>
-                                <td class="nowrap">
+                                <td class="nowrap" style="background:rgba(255, 95, 23, <?= sprintf('%0.3f', log($query['executionMS'] * 1000 + 1, 10) * 0.025) ?>)">
                                     <?php echo sprintf('%0.3f ms', $query['executionMS'] * 1000) ?>
                                     <br>
                                     <?php if (is_string($query['body'])): ?>
