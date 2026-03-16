@@ -7,6 +7,7 @@ namespace Ebrana\ElasticsearchExtension\Bridges\Tracy;
 use Elasticsearch\Connection\Connection;
 use Elasticsearch\Debug\DebugDataHolder;
 use Elasticsearch\Mapping\Exceptions\MappingJsonCreateException;
+use Elasticsearch\Mapping\Index;
 use Elasticsearch\Mapping\MappingMetadataProvider;
 use Elasticsearch\Mapping\Request\MetadataRequestFactory;
 use ReflectionClass;
@@ -17,16 +18,23 @@ final class QueryCollector
     private ?int $invalidEntityCount = null;
     private array $data = [];
     private const string COMPATIBLE_VERSION = '8.0.0';
-    private const string NOT_COMPATIBLE_VERSION = '9.0.0';
+    private const string NOT_COMPATIBLE_VERSION = '9.4.0';
 
     public function __construct(
+        private readonly Connection $connection,
         private readonly DebugDataHolder $debugDataHolder,
         private readonly MappingMetadataProvider $mappingMetadataProvider,
-        private readonly Connection $connection,
+        private readonly PlaygroundRequestHandler $playgroundRequestHandler,
         private readonly string $kibana,
     ) {
     }
 
+    /**
+     * @throws \Elastic\Elasticsearch\Exception\AuthenticationException
+     * @throws \Elastic\Elasticsearch\Exception\ClientResponseException
+     * @throws \Psr\Cache\InvalidArgumentException
+     * @throws \Elastic\Elasticsearch\Exception\ServerResponseException
+     */
     public function collect(): void
     {
         $this->data = [
@@ -36,6 +44,12 @@ final class QueryCollector
             'info'       => $this->connection->getServerInfo(),
             'connection' => [
                 'default' => 'elasticsearch.connection',
+            ],
+            'playground' => [
+                'indices' => $this->playgroundRequestHandler->getAllowedIndices(),
+                'token' => $this->playgroundRequestHandler->getCsrfToken(),
+                'generateUrl' => $this->playgroundRequestHandler->getGenerateUrl(),
+                'executeUrl' => $this->playgroundRequestHandler->getExecuteUrl(),
             ],
         ];
     }
@@ -97,6 +111,29 @@ final class QueryCollector
         return $this->data['connection'];
     }
 
+    /**
+     * @return string[]
+     */
+    public function getPlaygroundIndices(): array
+    {
+        return $this->data['playground']['indices'] ?? [];
+    }
+
+    public function getPlaygroundToken(): string
+    {
+        return $this->data['playground']['token'] ?? '';
+    }
+
+    public function getPlaygroundGenerateUrl(): string
+    {
+        return $this->data['playground']['generateUrl'] ?? '';
+    }
+
+    public function getPlaygroundExecuteUrl(): string
+    {
+        return $this->data['playground']['executeUrl'] ?? '';
+    }
+
     public function getInvalidEntityCount(): int
     {
         return $this->invalidEntityCount ??= count($this->data['entities']['invalid']);
@@ -104,6 +141,7 @@ final class QueryCollector
 
     /**
      * @return array<string, array<string, array<bool|string|int>>>
+     * @throws \Psr\Cache\InvalidArgumentException
      */
     private function provideEntitiesMapping(): array
     {

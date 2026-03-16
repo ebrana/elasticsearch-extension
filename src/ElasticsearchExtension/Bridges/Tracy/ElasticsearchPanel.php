@@ -17,14 +17,22 @@ use Tracy;
 readonly class ElasticsearchPanel implements Tracy\IBarPanel
 {
     public static function initialize(
+        Connection $connection,
         DebugDataHolder $debugDataHolder,
         MappingMetadataProvider $mappingMetadataProvider,
-        Connection $connection,
+        PlaygroundRequestHandler $playgroundRequestHandler,
         string $kibana,
     ): void
     {
         $bar ??= Tracy\Debugger::getBar();
-        $bar->addPanel(new self(new QueryCollector($debugDataHolder, $mappingMetadataProvider, $connection, $kibana)));
+        $queryCollector = new QueryCollector(
+            $connection,
+            $debugDataHolder,
+            $mappingMetadataProvider,
+            $playgroundRequestHandler,
+            $kibana
+        );
+        $bar->addPanel(new self($queryCollector));
     }
 
     public function __construct(
@@ -32,6 +40,13 @@ readonly class ElasticsearchPanel implements Tracy\IBarPanel
     ) {
     }
 
+    /**
+     * @throws \Elastic\Elasticsearch\Exception\AuthenticationException
+     * @throws \Throwable
+     * @throws \Elastic\Elasticsearch\Exception\ClientResponseException
+     * @throws \Psr\Cache\InvalidArgumentException
+     * @throws \Elastic\Elasticsearch\Exception\ServerResponseException
+     */
     public function getTab(): string
     {
         $this->queryCollector->collect();
@@ -41,6 +56,9 @@ readonly class ElasticsearchPanel implements Tracy\IBarPanel
         });
     }
 
+    /**
+     * @throws \Throwable
+     */
     public function getPanel(): ?string
     {
         return Tracy\Helpers::capture(function () {
