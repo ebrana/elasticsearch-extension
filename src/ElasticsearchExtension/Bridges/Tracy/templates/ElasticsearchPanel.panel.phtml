@@ -2,6 +2,16 @@
 
 use Tracy\Helpers;
 
+$playgroundIndices = $collector->getPlaygroundIndices();
+$playgroundDefaultQuery = <<<'JSON'
+{
+    "query": {
+        "match_all": {}
+    },
+    "size": 10
+}
+JSON;
+
 ?>
 
 <style class="tracy-debug">
@@ -18,20 +28,134 @@ use Tracy\Helpers;
     ul.tracy-tab-bar>li {
         float: left;
         padding: 10px;
-        background-color: lightgray;
+        background-color: #e3e3e3;
+        border: 1px solid #c8c8c8;
+        border-bottom: 0;
+        color: #444;
     }
     ul.tracy-tab-bar>li:hover {
-        background-color: #e4bebe;
+        background-color: #d6d6d6;
         cursor: pointer;
     }
 
     ul.tracy-tab-bar>li.tracy-active {
-        background-color: #919191;
+        background-color: #737373;
         color: white;
     }
     #tracy-debug .nette-ElasticsearchConnectionPanel-explain .es-strong {
         font-weight: bold;
         font-size: 12px;
+    }
+    #tracy-debug .playground-grid {
+        display: grid;
+        gap: 16px;
+        align-items: start;
+    }
+    #tracy-debug .playground-sidebar,
+    #tracy-debug .playground-results {
+        display: grid;
+        gap: 16px;
+    }
+    #tracy-debug .playground-form {
+        display: grid;
+        gap: 12px;
+    }
+    #tracy-debug .playground-form label {
+        display: block;
+        font-weight: bold;
+        margin-bottom: 4px;
+    }
+    #tracy-debug .playground-form select,
+    #tracy-debug .playground-form textarea {
+        width: 100%;
+        box-sizing: border-box;
+    }
+    #tracy-debug .playground-editor {
+        border: 1px solid #c9c9c9;
+        background: #fff;
+    }
+    #tracy-debug .playground-editor-toolbar {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px;
+        border-bottom: 1px solid #d8d8d8;
+        background: #f5f5f5;
+    }
+    #tracy-debug .playground-editor-actions,
+    #tracy-debug .playground-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    #tracy-debug .playground-editor-status {
+        font-size: 12px;
+        line-height: 24px;
+    }
+    #tracy-debug .playground-editor-status.is-valid {
+        color: #1f7a1f;
+    }
+    #tracy-debug .playground-editor-status.is-invalid {
+        color: #c62828;
+    }
+    #tracy-debug .playground-editor textarea {
+        min-height: 320px;
+        border: 0;
+        padding: 12px;
+        font: 12px/1.5 Consolas, Monaco, monospace;
+        resize: vertical;
+    }
+    #tracy-debug .playground-editor-help {
+        margin: 4px 0 0;
+        color: #666;
+        font-size: 12px;
+    }
+    #tracy-debug .playground-output {
+        min-width: 0;
+    }
+    #tracy-debug .playground-output pre {
+        margin: 0;
+        padding: 12px;
+        background: #fff;
+        border: 1px solid #d8d8d8;
+        overflow: auto;
+        max-width: 100%;
+        font: 12px/1.5 Consolas, Monaco, monospace;
+    }
+    #tracy-debug .playground-error {
+        display: none;
+        color: #c62828;
+    }
+    #tracy-debug .playground-error.is-visible {
+        display: block;
+    }
+    #tracy-debug .playground-button {
+        appearance: none;
+        border: 1px solid #9a9a9a;
+        border-radius: 3px;
+        background: linear-gradient(#f6f6f6, #dcdcdc);
+        color: #333;
+        padding: 6px 11px;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.2;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.85);
+    }
+    #tracy-debug .playground-button:hover {
+        background: linear-gradient(#ececec, #d1d1d1);
+        border-color: #878787;
+    }
+    #tracy-debug .playground-button:active {
+        background: linear-gradient(#d1d1d1, #ececec);
+        box-shadow: inset 0 1px 2px rgba(0,0,0,0.14);
+    }
+    #tracy-debug .playground-button:disabled {
+        opacity: 0.55;
+        cursor: default;
+    }
+    #tracy-debug .btn-playground-load {
+        margin-top: 6px;
+        white-space: nowrap;
     }
 </style>
 
@@ -56,14 +180,40 @@ use Tracy\Helpers;
                 <li class="tracy-tab-label"><span>Connections</span></li>
                 <li class="tracy-tab-label"><span>Mappings</span></li>
                 <li class="tracy-tab-label"><span>Server info</span></li>
+                <li class="tracy-tab-label"><span>Playground</span></li>
             </ul>
 
             <div>
                 <div class="tracy-tab-panel tracy-pane tracy-active">
                     <table class="tracy-sortable" id="nette-ElasticsearchConnectionPanel-queries">
-                        <tr><th>Time&nbsp;ms</th><th>Elasticsearch Query</th><th>Result</th><th>Shards</th><th>Kibana</th></tr>
+                        <tr><th>Time&nbsp;ms</th><th>Elasticsearch Query</th><th>Result</th><th>Shards</th><th>Kibana</th><th>Playground</th></tr>
                         <?php
                         foreach ($collector->getQueries() as $query):
+                            $queryParts = explode(' ', (string) $query['query']);
+                            $queryPath = end($queryParts);
+                            $searchPath = is_string($queryPath) ? explode('?', $queryPath)[0] : '';
+                            $inferredIndex = '';
+                            $inferredOperation = 'search';
+                            $playgroundQueryBody = $query['body'];
+
+                            if (is_string($searchPath) && str_contains($searchPath, '/_search') && !str_starts_with($searchPath, '/_search')) {
+                                $inferredIndex = trim(str_replace('/_search', '', $searchPath), '/');
+                            } elseif (is_string($searchPath) && str_contains($searchPath, '/_count') && !str_starts_with($searchPath, '/_count')) {
+                                $inferredIndex = trim(str_replace('/_count', '', $searchPath), '/');
+                                $inferredOperation = 'count';
+                            } elseif (is_string($searchPath) && str_contains($searchPath, '/_count')) {
+                                $inferredOperation = 'count';
+                            }
+
+                            if ($playgroundQueryBody === null && is_string($searchPath) && str_contains($searchPath, '/_count')) {
+                                $playgroundQueryBody = <<<'JSON'
+{
+    "query": {
+        "match_all": {}
+    }
+}
+JSON;
+                            }
                             ?>
                             <tr>
                                 <td class="nowrap" style="background:rgba(255, 95, 23, <?= sprintf('%0.3f', log($query['executionMS'] * 1000 + 1, 10) * 0.025) ?>)">
@@ -121,22 +271,33 @@ use Tracy\Helpers;
                                         }
                                     ?>
                                 </td>
-                                <?php
-                                $kibana = $collector->getKibana();
-                                if ($kibana) {
-                                    echo '<td>';
-                                    if (is_string($query['body'])) {
-                                        $body = '';
-                                        if (is_string($query['body'])) {
-                                            $body = print_r(json_encode(json_decode($query['body'], false, 512, JSON_THROW_ON_ERROR),
-                                                JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT), true);
-                                        }
+                                <td>
+                                    <?php
+                                    $kibana = $collector->getKibana();
+                                    if ($kibana && is_string($query['body'])) {
+                                        $body = print_r(json_encode(json_decode($query['body'], false, 512, JSON_THROW_ON_ERROR),
+                                            JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT), true);
 
                                         echo '<a href="' . $kibana . '/app/kibana#/dev_tools/console?load_from=data:text/plain,' . LZCompressor\LZString::compressToBase64($query['query'] . PHP_EOL . $body) . '" target="_blank">console</a>';
+                                    } else {
+                                        echo '-';
                                     }
-                                    echo '</td>';
-                                }
-                                ?>
+                                    ?>
+                                </td>
+                                <td>
+                                    <?php if (is_string($playgroundQueryBody) && (str_contains((string) $searchPath, '/_search') || str_contains((string) $searchPath, '/_count'))): ?>
+                                        <button
+                                            class="playground-button btn-playground-load"
+                                            type="button"
+                                            data-playground-load="true"
+                                            data-playground-query="<?= Helpers::escapeHtml((string) json_encode(json_decode($playgroundQueryBody, false, 512, JSON_THROW_ON_ERROR), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)) ?>"
+                                            data-playground-index="<?= Helpers::escapeHtml($inferredIndex) ?>"
+                                            data-playground-operation="<?= Helpers::escapeHtml($inferredOperation) ?>"
+                                        >Execute</button>
+                                    <?php else: ?>
+                                        -
+                                    <?php endif; ?>
+                                </td>
                             </tr>
                         <?php endforeach ?>
                     </table>
@@ -265,9 +426,359 @@ use Tracy\Helpers;
                     </div>
                 </div>
 
+                <div class="tracy-tab-panel tracy-pane">
+                    <div class="playground-grid">
+                        <div class="playground-sidebar">
+                            <div class="help">
+                                <p>Read-only Elasticsearch playground available only in debug mode. Allowed body keys: <code>query</code>, <code>aggs</code>, <code>sort</code>, <code>from</code>, <code>size</code>, <code>_source</code>, <code>collapse</code>, <code>search_after</code>, <code>track_total_hits</code>, <code>min_score</code>, <code>post_filter</code>.</p>
+                                <?php if ($playgroundIndices === []): ?>
+                                    <p>No Elasticsearch indexes are available from registered mapping metadata.</p>
+                                <?php endif; ?>
+                            </div>
+
+                            <form id="elasticsearch-playground-form" class="playground-form">
+                                <input type="hidden" name="_token" value="<?= Helpers::escapeHtml($collector->getPlaygroundToken()) ?>">
+                                <input type="hidden" name="operation" value="search">
+
+                                <div>
+                                    <label for="elasticsearch-playground-index">Index</label>
+                                    <select id="elasticsearch-playground-index" name="index" <?= $playgroundIndices === [] ? 'disabled' : '' ?>>
+                                        <?php foreach ($playgroundIndices as $index): ?>
+                                            <option value="<?= Helpers::escapeHtml($index) ?>"><?= Helpers::escapeHtml($index) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label for="elasticsearch-playground-query">JSON query body</label>
+                                    <div class="playground-editor">
+                                        <div class="playground-editor-toolbar">
+                                            <div class="playground-editor-actions">
+                                                <button class="playground-button" type="button" data-json-editor-action="format">Format JSON</button>
+                                                <button class="playground-button" type="button" data-json-editor-action="minify">Minify</button>
+                                                <button class="playground-button" type="button" data-json-editor-action="validate">Validate</button>
+                                            </div>
+                                            <div id="elasticsearch-playground-query-status" class="playground-editor-status">Ready</div>
+                                        </div>
+                                        <textarea id="elasticsearch-playground-query" name="query" rows="18" spellcheck="false"><?= Helpers::escapeHtml($playgroundDefaultQuery) ?></textarea>
+                                    </div>
+                                    <p class="playground-editor-help">Use <code>Tab</code> / <code>Shift+Tab</code> for indentation and <code>Ctrl+Shift+F</code> or <code>Cmd+Shift+F</code> to format.</p>
+                                </div>
+
+                                <div class="playground-actions">
+                                    <button class="playground-button" type="button" data-playground-action="generate">Generate PHP</button>
+                                    <button class="playground-button" type="button" data-playground-action="execute">Execute query</button>
+                                    <button class="playground-button" type="button" data-playground-action="reset">Reset</button>
+                                </div>
+                            </form>
+
+                            <div id="elasticsearch-playground-error" class="playground-error"></div>
+                        </div>
+
+                        <div class="playground-results">
+                            <div class="playground-output">
+                                <h2>PHP output</h2>
+                                <pre id="elasticsearch-playground-php">// Generated PHP code will appear here.</pre>
+                            </div>
+
+                            <div class="playground-output">
+                                <h2>Response</h2>
+                                <pre id="elasticsearch-playground-result">// Elasticsearch response will appear here after execution.</pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
 
         </div>
 </div>
 </div>
 </section>
+
+<script>
+(function () {
+    var form = document.getElementById('elasticsearch-playground-form');
+    if (!form) {
+        return;
+    }
+
+    var phpOutput = document.getElementById('elasticsearch-playground-php');
+    var resultOutput = document.getElementById('elasticsearch-playground-result');
+    var errorBox = document.getElementById('elasticsearch-playground-error');
+    var queryInput = document.getElementById('elasticsearch-playground-query');
+    var queryStatus = document.getElementById('elasticsearch-playground-query-status');
+    var indexInput = document.getElementById('elasticsearch-playground-index');
+    var operationInput = form.querySelector('input[name="operation"]');
+    var defaultQuery = <?= json_encode($playgroundDefaultQuery, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) ?>;
+    var defaultIndex = indexInput ? indexInput.value : '';
+    var allowedIndices = indexInput ? Array.prototype.map.call(indexInput.options, function (option) {
+        return option.value;
+    }) : [];
+    var endpoints = {
+        generate: <?= json_encode($collector->getPlaygroundGenerateUrl(), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) ?>,
+        execute: <?= json_encode($collector->getPlaygroundExecuteUrl(), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) ?>
+    };
+
+    function setQueryStatus(message, type) {
+        if (!queryStatus) {
+            return;
+        }
+
+        queryStatus.textContent = message;
+        queryStatus.classList.remove('is-valid', 'is-invalid');
+        if (type) {
+            queryStatus.classList.add(type);
+        }
+    }
+
+    function setQueryValue(value) {
+        queryInput.value = value;
+        updateQueryStatus();
+    }
+
+    function getParsedQuery() {
+        var parsed = JSON.parse(queryInput.value);
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+            throw new Error('Top-level JSON value must be an object.');
+        }
+
+        return parsed;
+    }
+
+    function updateQueryStatus() {
+        if (!queryInput.value.trim()) {
+            setQueryStatus('JSON body is empty.', 'is-invalid');
+            return false;
+        }
+
+        try {
+            getParsedQuery();
+            setQueryStatus('Valid JSON object', 'is-valid');
+            return true;
+        } catch (error) {
+            setQueryStatus(error.message, 'is-invalid');
+            return false;
+        }
+    }
+
+    function formatQuery(spaces) {
+        setQueryValue(JSON.stringify(getParsedQuery(), null, spaces));
+    }
+
+    function indentSelection(textarea, shouldOutdent) {
+        var start = textarea.selectionStart;
+        var end = textarea.selectionEnd;
+        var value = textarea.value;
+        var hasSelection = start !== end;
+        var lineStart = value.lastIndexOf('\n', start - 1) + 1;
+        var lineEnd = hasSelection ? end : start;
+        var selectedText;
+        var updatedText;
+
+        if (!hasSelection && !shouldOutdent) {
+            textarea.value = value.slice(0, start) + '    ' + value.slice(end);
+            textarea.selectionStart = start + 4;
+            textarea.selectionEnd = start + 4;
+            return;
+        }
+
+        selectedText = value.slice(lineStart, lineEnd);
+        updatedText = shouldOutdent
+            ? selectedText.replace(/^( {1,4}|\t)/gm, '')
+            : selectedText.replace(/^/gm, '    ');
+
+        textarea.value = value.slice(0, lineStart) + updatedText + value.slice(lineEnd);
+        textarea.selectionStart = lineStart;
+        textarea.selectionEnd = lineStart + updatedText.length;
+    }
+
+    function showError(message) {
+        errorBox.classList.add('is-visible');
+        errorBox.innerHTML = '<p>' + message + '</p>';
+    }
+
+    function clearError() {
+        errorBox.classList.remove('is-visible');
+        errorBox.innerHTML = '';
+    }
+
+    function switchToPlaygroundTab() {
+        var tabs = form.closest('.tracy-tabs');
+        if (!tabs) {
+            return;
+        }
+
+        var labels = tabs.querySelectorAll('.tracy-tab-bar .tracy-tab-label');
+        labels.forEach(function (label) {
+            if (label.textContent.trim() === 'Playground') {
+                label.click();
+            }
+        });
+    }
+
+    function setBusy(isBusy) {
+        form.querySelectorAll('button[data-playground-action]').forEach(function (button) {
+            button.disabled = isBusy;
+        });
+    }
+
+    function submitPlayground(action) {
+        if (action === 'reset') {
+            clearError();
+            setQueryValue(defaultQuery);
+            if (indexInput) {
+                indexInput.value = defaultIndex;
+            }
+            if (operationInput) {
+                operationInput.value = 'search';
+            }
+            phpOutput.textContent = '// Generated PHP code will appear here.';
+            resultOutput.textContent = '// Elasticsearch response will appear here after execution.';
+            return;
+        }
+
+        clearError();
+        setBusy(true);
+
+        if (!updateQueryStatus()) {
+            showError('JSON body is not valid.');
+            queryInput.focus();
+            setBusy(false);
+            return;
+        }
+
+        fetch(endpoints[action], {
+            method: 'POST',
+            body: new FormData(form),
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+            .then(function (response) {
+                return response.text().then(function (text) {
+                    var data = {};
+
+                    if (text.trim() !== '') {
+                        try {
+                            data = JSON.parse(text);
+                        } catch (error) {
+                            throw new Error('Playground endpoint did not return JSON. HTTP ' + response.status + '.');
+                        }
+                    }
+
+                    return { status: response.status, data: data };
+                })
+            })
+            .then(function (payload) {
+                if (payload.status >= 400) {
+                    throw new Error(payload.data.error || 'Playground request failed.');
+                }
+
+                if (action === 'generate') {
+                    phpOutput.textContent = payload.data.php || '// No PHP output.';
+                }
+
+                if (action === 'execute') {
+                    resultOutput.textContent = payload.data.result || '// Elasticsearch response will appear here after execution.';
+                }
+            })
+            .catch(function (error) {
+                showError(error.message);
+            })
+            .finally(function () {
+                setBusy(false);
+            });
+    }
+
+    function loadQueryIntoPlayground(button) {
+        var playgroundQuery = button.getAttribute('data-playground-query') || defaultQuery;
+        var playgroundIndex = button.getAttribute('data-playground-index') || '';
+        var playgroundOperation = button.getAttribute('data-playground-operation') || 'search';
+
+        clearError();
+        setQueryValue(playgroundQuery);
+        if (operationInput) {
+            operationInput.value = playgroundOperation;
+        }
+        phpOutput.textContent = '// Generated PHP code will appear here.';
+        resultOutput.textContent = '// Elasticsearch response will appear here after execution.';
+
+        if (indexInput) {
+            if (playgroundIndex && allowedIndices.indexOf(playgroundIndex) !== -1) {
+                indexInput.value = playgroundIndex;
+                switchToPlaygroundTab();
+                submitPlayground('execute');
+                return;
+            }
+
+            indexInput.value = defaultIndex;
+        }
+
+        switchToPlaygroundTab();
+        showError('Query was loaded into Playground. Execute was skipped because its index could not be resolved from the allowed profiler index list.');
+    }
+
+    form.querySelectorAll('button[data-playground-action]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            submitPlayground(button.getAttribute('data-playground-action'));
+        });
+    });
+
+    form.querySelectorAll('button[data-json-editor-action]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            clearError();
+
+            try {
+                switch (button.getAttribute('data-json-editor-action')) {
+                    case 'format':
+                        formatQuery(4);
+                        break;
+                    case 'minify':
+                        formatQuery(0);
+                        break;
+                    case 'validate':
+                        updateQueryStatus();
+                        break;
+                }
+            } catch (error) {
+                setQueryStatus(error.message, 'is-invalid');
+                showError(error.message);
+                queryInput.focus();
+            }
+        });
+    });
+
+    queryInput.addEventListener('input', function () {
+        updateQueryStatus();
+    });
+
+    queryInput.addEventListener('keydown', function (event) {
+        if (event.key === 'Tab') {
+            event.preventDefault();
+            indentSelection(queryInput, event.shiftKey);
+            updateQueryStatus();
+            return;
+        }
+
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f') {
+            event.preventDefault();
+
+            try {
+                formatQuery(4);
+            } catch (error) {
+                setQueryStatus(error.message, 'is-invalid');
+                showError(error.message);
+            }
+        }
+    });
+
+    document.querySelectorAll('button[data-playground-load]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            loadQueryIntoPlayground(button);
+        });
+    });
+
+    updateQueryStatus();
+})();
+</script>

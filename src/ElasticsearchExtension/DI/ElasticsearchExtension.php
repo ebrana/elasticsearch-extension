@@ -6,6 +6,8 @@ namespace Ebrana\ElasticsearchExtension\DI;
 
 use Contributte\Console\DI\ConsoleExtension;
 use Ebrana\ElasticsearchExtension\Bridges\Tracy\ElasticsearchPanel;
+use Ebrana\ElasticsearchExtension\Bridges\Tracy\PlaygroundRequestHandler;
+use Ebrana\ElasticsearchExtension\Bridges\Tracy\PlaygroundService;
 use Ebrana\ElasticsearchExtension\Command\CreateIndexCommand;
 use Ebrana\ElasticsearchExtension\Command\DeleteIndexCommand;
 use Ebrana\ElasticsearchExtension\Command\InformationIndexCommand;
@@ -22,6 +24,7 @@ use Elasticsearch\Mapping\MappingMetadataFactory;
 use Elasticsearch\Mapping\MappingMetadataProvider;
 use Elasticsearch\Mapping\Request\MetadataRequestFactory;
 use Elasticsearch\Search\SearchBuilderFactory;
+use Elasticsearch\Tools\PhpQueryBuilder;
 use Nette\Bridges\Psr\PsrCacheAdapter;
 use Nette\DI\CompilerExtension;
 use Nette\Schema\Expect;
@@ -36,13 +39,13 @@ class ElasticsearchExtension extends CompilerExtension
         return Expect::structure([
             'profiling'   => Expect::bool(false),
             'indexPrefix' => Expect::string(''),
-            'kibana'      => Expect::string('http://localhost:5601'),
+            'kibana'      => Expect::string('')->nullable(),
             'cache'       => Expect::string()->nullable(),
             'driver'      => Expect::structure([
                 'type'        => Expect::anyOf('attributes', 'json')->default('attributes'),
                 'keyResolver' => Expect::string(),
             ]),
-            'hosts'       => Expect::array(['localhost:9200']),
+            'hosts'       => Expect::array()->required(),
             'mappings'    => Expect::listOf('string'),
         ]);
     }
@@ -108,6 +111,10 @@ class ElasticsearchExtension extends CompilerExtension
             ->setFactory(SearchBuilderFactory::class)
             ->setArguments([$mappingMetadataProvider, $config['indexPrefix']]);
 
+        $phpQueryBuilder = $builder->addDefinition($this->prefix('elasticsearch.phpQueryBuilder'))
+            ->setType(PhpQueryBuilder::class)
+            ->setFactory(PhpQueryBuilder::class);
+
         $documentFactory = $builder->addDefinition($this->prefix('elasticsearch.documentFactory'))
             ->setType(DocumentFactory::class)
             ->setFactory(DocumentFactory::class)
@@ -118,13 +125,24 @@ class ElasticsearchExtension extends CompilerExtension
                 ->setType(DebugDataHolder::class)
                 ->setFactory(DebugDataHolder::class);
 
+            $builder->addDefinition($this->prefix('elasticsearch.playgroundService'))
+                ->setType(PlaygroundService::class)
+                ->setFactory(PlaygroundService::class)
+                ->setArguments([$connection, $mappingMetadataProvider, $phpQueryBuilder]);
+
+            $playgroundRequestHandler = $builder->addDefinition($this->prefix('elasticsearch.playgroundRequestHandler'))
+                ->setType(PlaygroundRequestHandler::class)
+                ->setFactory(PlaygroundRequestHandler::class);
+
+            $this->initialization->addBody('$this->getService(?)->handle();', [$playgroundRequestHandler->getName()]);
+
             $connection->setType(\Elasticsearch\Debug\Connection::class)
                 ->setFactory(\Elasticsearch\Debug\Connection::class)
                 ->setArguments([$debugDataHolder, $connectionFactory, $config['indexPrefix']]);
 
             $connection->addSetup(
                 [ElasticsearchPanel::class, 'initialize'],
-                [$debugDataHolder, $mappingMetadataProvider, $connection, $config['kibana']],
+                [$connection, $debugDataHolder, $mappingMetadataProvider, $playgroundRequestHandler, $config['kibana']],
             );
         }
 

@@ -50,3 +50,6 @@ elasticsearch:
 
 #### Tracy
 ![screen.png](screen.png)
+
+and with Playground
+![screen2.png](screen2.png)
