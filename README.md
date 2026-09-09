@@ -53,3 +53,7 @@ elasticsearch:
 
 and with Playground
 ![screen2.png](screen2.png)
+
+Do Tracy se zapisují volání `hasIndex`, `createIndex`, `deleteIndex`, `indexDocument`,
+`count` a `search`. Metody `bulk()`, `analyze()`, `openPointInTime()` a `closePointInTime()`
+z knihovny fungují normálně, ale v Tracy se neobjeví.
